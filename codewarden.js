@@ -2,6 +2,7 @@ const core = require('@actions/core');
 const axios = require('axios');
 const github = require('@actions/github');
 
+
 async function runCodeWarden() {
   try {
     core.info('Code Warden workflow started');
@@ -10,15 +11,21 @@ async function runCodeWarden() {
     const jiraUser = core.getInput('jira-user');
     const jiraPwd = core.getInput('jira-password');
     const commentLanguage = core.getInput('comment-language');
-
-    const codewardenUrl = `${jiraUrl}/rest/analyze/1.0/pr`;
-
+    const jiraCloudEdition = core.getInput('jira-cloud-edition');
+   
+    
     const { context } = github;
     const { eventName, payload } = context;
+
+    let codewardenUrl = `${jiraUrl}/rest/analyze/1.0/pr`;
 
     if (eventName !== "pull_request") {
       core.setFailed('Only pull requests are supported.');
       return;
+    }
+    
+    if(jiraCloudEdition === true || jiraCloudEdition === 'true') {
+      codewardenUrl = `${jiraUrl}`;
     }
 
     const { pull_request: pullRequest } = payload;
@@ -57,16 +64,26 @@ async function runCodeWarden() {
 
 
   } catch (error) {
-    handleError(null, error.message);
+    if (error.response) {
+      handleResponse(error.response);
+    }
+    else{
+      handleError(null, error.message);
+    }
+   
+
   }
 }
 
 function handleResponse(response) {
   const { status, data: responseBody } = response;
+  core.debug('response status:' + status);
+  core.debug('response body:' + responseBody);
 
   const statuses = {
     200: () => handleSuccess(responseBody),
     400: () => handleError(responseBody, contextError = 'Bad Request: Please check all required fields'),
+    401: () => handleError(responseBody, contextError = 'UnAuthorized: Invalid License'),
     404: () => handleError(responseBody, contextError = 'Not Found: Requested resource could not be found'),
     500: () => handleError(responseBody, contextError = 'Internal Server Error: Something went wrong on our side')
   };
@@ -75,6 +92,7 @@ function handleResponse(response) {
 
   (statuses[status] || defaultAction)();
 }
+
 
 function handleSuccess(responseBody) {
   let codeWardenMessage = responseBody.message;
@@ -91,7 +109,7 @@ function handleError(responseBody = null, contextError = null) {
   if (contextError != null) {
     codeWardenErrorMessage = `Unexpected Error: Code Warden encountered an issue \n ${contextError}`;
   }
-  
+
 
   if (responseBody) {
     responseErrorCode = responseBody.errorCode;
@@ -104,12 +122,10 @@ function handleError(responseBody = null, contextError = null) {
   return core.setFailed(codeWardenErrorMessage);
 }
 
+
 module.exports = { runCodeWarden };
 // Check if running in GitHub Actions
 if (process.env.GITHUB_ACTIONS === 'true') {
   runCodeWarden()
-    .catch(error => {
-      core.setFailed(`Unexpected Error: Code Warden encountered an issue ${error.message}`);
-    });
 }
 
